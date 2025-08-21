@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 import pdfplumber
 from openai import OpenAI
+import json
 
 app = FastAPI()
 client = OpenAI()
@@ -25,7 +26,7 @@ async def generate_flashcards(
         if not text.strip():
             raise HTTPException(status_code=400, detail="No text found in PDF")
 
-        # Cut down text for testing (to avoid token overflow)
+        # Limit text size (to avoid hitting token limits)
         text = text[:2000]
 
         response = client.chat.completions.create(
@@ -33,15 +34,21 @@ async def generate_flashcards(
             messages=[
                 {
                     "role": "user",
-                    "content": f"Make {num_flashcards} flashcards from this text as JSON array with 'question' and 'answer' fields:\n{text}"
+                    "content": f"Make {num_flashcards} flashcards from this text as a valid JSON array with 'question' and 'answer' fields only. Do not include extra text or markdown:\n{text}"
                 }
             ]
         )
 
-        flashcards = response.choices[0].message.content.strip()
+        raw_output = response.choices[0].message.content.strip()
+
+        # Try to load JSON safely
+        try:
+            flashcards = json.loads(raw_output)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=500, detail="Model did not return valid JSON")
 
         return {"flashcards": flashcards}
-    
+
     except Exception as e:
         import traceback
         traceback.print_exc()
