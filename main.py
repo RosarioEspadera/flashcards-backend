@@ -1,6 +1,8 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 import pdfplumber
 from openai import OpenAI
+import json
+import re
 
 app = FastAPI()
 client = OpenAI()
@@ -23,19 +25,27 @@ async def generate_flashcards(pdf: UploadFile = File(...)):
         if not text.strip():
             raise HTTPException(status_code=400, detail="No text found in PDF")
 
-        # Limit text length to avoid exceeding token limit
+        # Cut text for testing
         text = text[:2000]
 
-        # 2. Ask OpenAI to generate flashcards
+        # 2. Ask OpenAI for flashcards
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a flashcard generator. Format output as JSON with 'question' and 'answer'."},
+                {"role": "system", "content": "You are a flashcard generator. Always output only JSON array with 'question' and 'answer'."},
                 {"role": "user", "content": f"Make 5 flashcards from this text:\n{text}"}
             ]
         )
 
-        flashcards = response.choices[0].message.content
+        raw_output = response.choices[0].message.content
+
+        # 3. Clean and parse JSON
+        cleaned = re.sub(r"```json|```", "", raw_output).strip()
+
+        try:
+            flashcards = json.loads(cleaned)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=500, detail="Failed to parse AI response as JSON")
 
         return {"flashcards": flashcards}
 
