@@ -13,6 +13,10 @@ def extract_text(pdf_file):
                 text += page.extract_text() + "\n"
     return text
 
+@app.get("/")
+async def root():
+    return {"message": "Flashcards backend is running 🚀"}
+
 @app.post("/generate_flashcards")
 async def generate_flashcards(pdf: UploadFile = File(...)):
     text = extract_text(pdf)
