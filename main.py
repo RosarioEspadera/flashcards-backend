@@ -21,36 +21,46 @@ async def root():
 
 @app.post("/generate_flashcards")
 async def generate_flashcards(
-    text: str = Form(...),            # 🔥 now text is sent directly
+    request: Request,
+    pdf: UploadFile = File(None),      # optional
     num_flashcards: int = Form(5),
-    topic: str = Form(None)
+    topic: str = Form(None),
+    text: str = Form(None)             # 🔥 NEW: direct text input
 ):
     start_time = time.time()
     try:
-        print(f"📝 Flashcards requested: {num_flashcards}")
-        if topic:
-            print(f"🔎 Topic filter: {topic}")
-        print(f"📄 Received text length: {len(text)} chars")
+        if text:
+            # 🔥 Use text extracted by frontend
+            extracted_text = text[:2000]
+        elif pdf:
+            # fallback: extract from PDF server-side
+            extracted_text = ""
+            with pdfplumber.open(pdf.file) as pdf_obj:
+                for page in pdf_obj.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        extracted_text += page_text + "\n"
+                    if len(extracted_text) > 2000:
+                        break
+            extracted_text = extracted_text[:2000]
+        else:
+            raise HTTPException(status_code=400, detail="No input provided")
 
-        # Safety limit
-        text = text[:2000]
-
-        # Build Prompt
+        # --- Build prompt
         if topic:
             user_prompt = (
                 f"Generate exactly {num_flashcards} flashcards only about the topic '{topic}' "
                 f"from the following text. Ignore unrelated content.\n\n"
-                f'Return JSON in this structure:\n'
-                f'{{"flashcards": [{{"question": "...", "answer": "..."}}]}}.\n\n'
-                f"Text:\n{text}"
+                f'{{"flashcards": [{{"question": "...", "answer": "..."}}]}}\n\n'
+                f"Text:\n{extracted_text}"
             )
         else:
             user_prompt = (
                 f"Generate exactly {num_flashcards} flashcards from the following text.\n\n"
-                f'Return JSON in this structure:\n'
-                f'{{"flashcards": [{{"question": "...", "answer": "..."}}]}}.\n\n'
-                f"Text:\n{text}"
+                f'{{"flashcards": [{{"question": "...", "answer": "..."}}]}}\n\n'
+                f"Text:\n{extracted_text}"
             )
+
 
         # OpenAI call
         response = client.chat.completions.create(
