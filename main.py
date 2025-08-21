@@ -46,12 +46,15 @@ async def status():
 async def generate_flashcards(
     request: Request,
     pdf: UploadFile = File(...),
-    num_flashcards: int = Form(5)
+    num_flashcards: int = Form(5),
+    topic: str = Form(None)  # 🔥 new optional topic filter
 ):
     start_time = time.time()  # ⏱ start timing
     try:
         print(f"📂 Uploaded file: {pdf.filename}")
         print(f"📝 Flashcards requested: {num_flashcards}")
+        if topic:
+            print(f"🔎 Topic filter: {topic}")
 
         # --- Extract PDF text ---
         text = ""
@@ -65,7 +68,25 @@ async def generate_flashcards(
         if not text.strip():
             raise HTTPException(status_code=400, detail="No text found in PDF")
 
+        # limit to avoid too large payload
         text = text[:2000]
+
+        # --- Build Prompt ---
+        if topic:
+            user_prompt = (
+                f"Generate exactly {num_flashcards} flashcards only about the topic '{topic}' "
+                f"from the following text. Ignore unrelated content.\n\n"
+                f'Return JSON in this structure:\n'
+                f'{{"flashcards": [{{"question": "...", "answer": "..."}}]}}.\n\n'
+                f"Text:\n{text}"
+            )
+        else:
+            user_prompt = (
+                f"Generate exactly {num_flashcards} flashcards from the following text.\n\n"
+                f'Return JSON in this structure:\n'
+                f'{{"flashcards": [{{"question": "...", "answer": "..."}}]}}.\n\n'
+                f"Text:\n{text}"
+            )
 
         # --- OpenAI Request ---
         response = client.chat.completions.create(
@@ -73,15 +94,7 @@ async def generate_flashcards(
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": "You are a JSON generator. Always return valid JSON only."},
-                {
-                    "role": "user",
-                    "content": (
-                        f"Generate exactly {num_flashcards} flashcards from the following text. "
-                        f"Return JSON in this structure:\n"
-                        f'{{"flashcards": [{{"question": "...", "answer": "..."}}]}}.\n\n'
-                        f"Text:\n{text}"
-                    )
-                }
+                {"role": "user", "content": user_prompt}
             ]
         )
 
@@ -105,7 +118,8 @@ async def generate_flashcards(
 
         return {
             "flashcards": flashcards,
-            "processing_time": duration
+            "processing_time": duration,
+            "topic_used": topic if topic else None
         }
 
     except Exception as e:
