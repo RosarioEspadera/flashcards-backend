@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+from fastapi.middleware.cors import CORSMiddleware
 import pdfplumber
 from openai import OpenAI
 import json
@@ -6,6 +7,7 @@ import json
 app = FastAPI()
 client = OpenAI()
 
+# Enable CORS for frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],   
@@ -47,9 +49,10 @@ async def generate_flashcards(
             ]
         )
 
-        raw_output = response.choices[0].message.content.strip()
+        # FIX: new OpenAI SDK indexing
+        raw_output = response.choices[0].message["content"].strip()
 
-        # Try to load JSON safely
+        # Parse JSON
         try:
             flashcards = json.loads(raw_output)
         except json.JSONDecodeError:
