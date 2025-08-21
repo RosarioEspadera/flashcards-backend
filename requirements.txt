@@ -1,5 +1,6 @@
 fastapi
 uvicorn
-pdfplumber
-openai
+pydantic
 python-multipart
+openai
+PyPDF2
