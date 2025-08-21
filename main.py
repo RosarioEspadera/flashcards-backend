@@ -1,17 +1,15 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request
+from fastapi import FastAPI, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import pdfplumber
 from openai import OpenAI
-import json
-import time
+import json, time
 
 app = FastAPI()
 client = OpenAI()
 
-# Enable CORS
+# Enable CORS (adjust if you want specific frontend domain only)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # or restrict to your frontend domain
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -21,84 +19,40 @@ app.add_middleware(
 async def root():
     return {"message": "Flashcards backend is running 🚀"}
 
-@app.get("/health")
-async def health():
-    return {"alive": True}
-
-@app.get("/status")
-async def status():
-    return {
-        "status": "ok ✅",
-        "endpoints": {
-            "root": "/",
-            "generate_flashcards": "/generate_flashcards",
-            "status": "/status",
-            "health": "/health"
-        },
-        "config": {
-            "model": "gpt-4o-mini",
-            "pdf_text_limit": 2000,
-            "default_flashcards": 5
-        }
-    }
-
 @app.post("/generate_flashcards")
 async def generate_flashcards(
-    request: Request,
-    pdf: UploadFile = File(...),
+    text: str = Form(...),            # 🔥 now text is sent directly
     num_flashcards: int = Form(5),
-    topic: str = Form(None)  # 🔥 optional topic filter
+    topic: str = Form(None)
 ):
     start_time = time.time()
     try:
-        print(f"📂 Uploaded file: {pdf.filename}")
         print(f"📝 Flashcards requested: {num_flashcards}")
         if topic:
             print(f"🔎 Topic filter: {topic}")
+        print(f"📄 Received text length: {len(text)} chars")
 
-        # --- Extract PDF text ---
-        text = ""
-        with pdfplumber.open(pdf.file) as pdf_obj:
-            for page_num, page in enumerate(pdf_obj.pages, start=1):
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-
-        if not text.strip():
-            raise HTTPException(status_code=400, detail="No text found in PDF")
-
-        # --- Pre-filter if topic provided ---
-        if topic:
-            lines = [line for line in text.splitlines() if topic.lower() in line.lower()]
-            filtered_text = "\n".join(lines).strip()
-            if not filtered_text:
-                raise HTTPException(status_code=404, detail=f"No content found about topic '{topic}' in PDF")
-            text = filtered_text
-            print(f"✅ Filtered text length: {len(text)} chars (topic only)")
-        else:
-            print("⚠️ No topic provided, using full text")
-
-        # --- Limit text size to avoid overload ---
+        # Safety limit
         text = text[:2000]
 
-        # --- Build Prompt ---
+        # Build Prompt
         if topic:
             user_prompt = (
                 f"Generate exactly {num_flashcards} flashcards only about the topic '{topic}' "
                 f"from the following text. Ignore unrelated content.\n\n"
                 f'Return JSON in this structure:\n'
-                f'{{\"flashcards\": [{{\"question\": \"...\", \"answer\": \"...\"}}]}}.\n\n'
+                f'{{"flashcards": [{{"question": "...", "answer": "..."}}]}}.\n\n'
                 f"Text:\n{text}"
             )
         else:
             user_prompt = (
                 f"Generate exactly {num_flashcards} flashcards from the following text.\n\n"
                 f'Return JSON in this structure:\n'
-                f'{{\"flashcards\": [{{\"question\": \"...\", \"answer\": \"...\"}}]}}.\n\n'
+                f'{{"flashcards": [{{"question": "...", "answer": "..."}}]}}.\n\n'
                 f"Text:\n{text}"
             )
 
-        # --- OpenAI Request ---
+        # OpenAI call
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             response_format={"type": "json_object"},
@@ -117,24 +71,12 @@ async def generate_flashcards(
             parsed = json.loads(raw_output)
             flashcards = parsed.get("flashcards", [])
         except Exception as e:
-            print("❌ JSON parse failed, returning dummy flashcards:", e)
-            flashcards = [
-                {"question": "Sample Question 1", "answer": "Sample Answer 1"},
-                {"question": "Sample Question 2", "answer": "Sample Answer 2"},
-            ]
+            print("❌ JSON parse failed:", e)
+            flashcards = [{"question": "Sample Q", "answer": "Sample A"}]
 
         duration = round(time.time() - start_time, 2)
-        print(f"✅ Request processed in {duration} seconds")
-
-        return {
-            "flashcards": flashcards,
-            "processing_time": duration,
-            "topic_used": topic if topic else None
-        }
+        return {"flashcards": flashcards, "processing_time": duration, "topic_used": topic or None}
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        duration = round(time.time() - start_time, 2)
-        print(f"❌ Error after {duration} seconds: {str(e)}")
+        import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
