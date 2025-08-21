@@ -47,9 +47,9 @@ async def generate_flashcards(
     request: Request,
     pdf: UploadFile = File(...),
     num_flashcards: int = Form(5),
-    topic: str = Form(None)  # 🔥 new optional topic filter
+    topic: str = Form(None)  # 🔥 optional topic filter
 ):
-    start_time = time.time()  # ⏱ start timing
+    start_time = time.time()
     try:
         print(f"📂 Uploaded file: {pdf.filename}")
         print(f"📝 Flashcards requested: {num_flashcards}")
@@ -62,13 +62,23 @@ async def generate_flashcards(
             for page_num, page in enumerate(pdf_obj.pages, start=1):
                 page_text = page.extract_text()
                 if page_text:
-                    print(f"   Extracted text from page {page_num} ({len(page_text)} chars)")
                     text += page_text + "\n"
 
         if not text.strip():
             raise HTTPException(status_code=400, detail="No text found in PDF")
 
-        # limit to avoid too large payload
+        # --- Pre-filter if topic provided ---
+        if topic:
+            lines = [line for line in text.splitlines() if topic.lower() in line.lower()]
+            filtered_text = "\n".join(lines).strip()
+            if not filtered_text:
+                raise HTTPException(status_code=404, detail=f"No content found about topic '{topic}' in PDF")
+            text = filtered_text
+            print(f"✅ Filtered text length: {len(text)} chars (topic only)")
+        else:
+            print("⚠️ No topic provided, using full text")
+
+        # --- Limit text size to avoid overload ---
         text = text[:2000]
 
         # --- Build Prompt ---
@@ -77,14 +87,14 @@ async def generate_flashcards(
                 f"Generate exactly {num_flashcards} flashcards only about the topic '{topic}' "
                 f"from the following text. Ignore unrelated content.\n\n"
                 f'Return JSON in this structure:\n'
-                f'{{"flashcards": [{{"question": "...", "answer": "..."}}]}}.\n\n'
+                f'{{\"flashcards\": [{{\"question\": \"...\", \"answer\": \"...\"}}]}}.\n\n'
                 f"Text:\n{text}"
             )
         else:
             user_prompt = (
                 f"Generate exactly {num_flashcards} flashcards from the following text.\n\n"
                 f'Return JSON in this structure:\n'
-                f'{{"flashcards": [{{"question": "...", "answer": "..."}}]}}.\n\n'
+                f'{{\"flashcards\": [{{\"question\": \"...\", \"answer\": \"...\"}}]}}.\n\n'
                 f"Text:\n{text}"
             )
 
@@ -113,7 +123,7 @@ async def generate_flashcards(
                 {"question": "Sample Question 2", "answer": "Sample Answer 2"},
             ]
 
-        duration = round(time.time() - start_time, 2)  # ⏱ end timing
+        duration = round(time.time() - start_time, 2)
         print(f"✅ Request processed in {duration} seconds")
 
         return {
