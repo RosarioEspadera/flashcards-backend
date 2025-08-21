@@ -1,17 +1,9 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException
 import pdfplumber
 from openai import OpenAI
 
 app = FastAPI()
-client = OpenAI()  # uses OPENAI_API_KEY from environment
-
-def extract_text(pdf_file):
-    text = ""
-    with pdfplumber.open(pdf_file.file) as pdf:
-        for page in pdf.pages:
-            if page.extract_text():
-                text += page.extract_text() + "\n"
-    return text
+client = OpenAI()
 
 @app.get("/")
 async def root():
@@ -19,11 +11,31 @@ async def root():
 
 @app.post("/generate_flashcards")
 async def generate_flashcards(pdf: UploadFile = File(...)):
-    text = extract_text(pdf)
+    try:
+        text = ""
+        with pdfplumber.open(pdf.file) as pdf_obj:
+            for page in pdf_obj.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": f"Make flashcards from this text:\n{text}"}]
-    )
+        if not text.strip():
+            raise HTTPException(status_code=400, detail="No text found in PDF")
 
-    return {"flashcards": response.choices[0].message["content"]}
+        # Cut down text for testing
+        text = text[:2000]
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "user", "content": f"Make 5 flashcards from this text:\n{text}"}
+            ]
+        )
+
+        return {"flashcards": response.choices[0].message["content"]}
+    
+    except Exception as e:
+        # Print full error to logs
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
